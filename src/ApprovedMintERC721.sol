@@ -30,7 +30,7 @@ contract ApprovedMintERC721 is IApprovedMintERC721, ERC721, Roles {
     /// @param message SHA-3 Hash of the signed message
     /// @param signature Signature
     /// @return Address of the signer
-    function _getSigner(bytes32 message, bytes calldata signature) internal pure returns(address) {
+    function _getSigner(bytes32 message, bytes calldata signature) internal pure returns (address) {
         bytes32 hash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", message));
         return ECDSA.recover(hash, signature);
     }
@@ -38,24 +38,18 @@ contract ApprovedMintERC721 is IApprovedMintERC721, ERC721, Roles {
     /// @dev Checks the validity of a signature to allow the mint of an NFT
     /// @param blockNumber Number of the block when the signature expires
     /// @param signature Signature to check
-    function _checkMintSignature(
-        uint256 blockNumber,
-        bytes calldata signature
-    ) internal view {
+    function _checkMintSignature(uint256 blockNumber, bytes calldata signature) internal view {
         if (blockNumber < block.number) {
             revert ExpiredSignature();
         }
-        address signer = _getSigner(
-            keccak256(
-                abi.encodePacked(msg.sender, _userNonce[msg.sender], blockNumber)
-            ), signature
-        );
+        address signer =
+            _getSigner(keccak256(abi.encodePacked(msg.sender, _userNonce[msg.sender], blockNumber)), signature);
         if (!_hasRole(signer, 1)) {
             revert Unauthorized();
         }
     }
 
-    function totalSupply() external view returns(uint256) {
+    function totalSupply() external view returns (uint256) {
         return _totalSupply;
     }
 }

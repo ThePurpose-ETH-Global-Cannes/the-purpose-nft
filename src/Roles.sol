@@ -7,6 +7,7 @@ contract Roles {
     using Bits for bytes32;
 
     error MissingRole(address user, uint256 role);
+
     event RoleUpdated(address indexed user, uint256 indexed role, bool indexed status);
 
     uint8 internal constant DEFAULT_ADMIN_ROLE = 0x00;
@@ -25,11 +26,11 @@ contract Roles {
         _setRole(defaultAdmin, DEFAULT_ADMIN_ROLE, true);
     }
 
-    function _hasRole(address user, uint8 role) internal view returns(bool) {
+    function _hasRole(address user, uint8 role) internal view returns (bool) {
         return _addressRoles[user].getBool(role);
     }
 
-    function _checkRole(address user, uint8 role) internal virtual view {
+    function _checkRole(address user, uint8 role) internal view virtual {
         if (!_hasRole(user, role)) {
             revert MissingRole(user, role);
         }
@@ -44,7 +45,7 @@ contract Roles {
         _setRole(user, role, status);
     }
 
-    function getRoles(address user) external view returns(bytes32) {
+    function getRoles(address user) external view returns (bytes32) {
         return _addressRoles[user];
     }
 }

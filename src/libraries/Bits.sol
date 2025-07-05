@@ -14,22 +14,13 @@ library Bits {
     /**
      * @dev set bit [offset] to {value}
      */
-    function setBool(
-        bytes32 p,
-        uint8 offset,
-        bool value
-    ) internal pure returns (bytes32 np) {
+    function setBool(bytes32 p, uint8 offset, bool value) internal pure returns (bytes32 np) {
         assembly {
-            np := or(
-                and(
-                    p,
-                    xor(
-                        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF,
-                        shl(offset, 1)
-                    )
-                ),
-                shl(offset, value)
-            )
+            np :=
+                or(
+                    and(p, xor(0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF, shl(offset, 1))),
+                    shl(offset, value)
+                )
         }
     }
 }
