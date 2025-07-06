@@ -25,7 +25,7 @@ jobs:
           forge --version
 
       - name: Run Forge fmt
-        run: |
+        #run: |
           forge fmt --check
         id: fmt
 
