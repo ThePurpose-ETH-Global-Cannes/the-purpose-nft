@@ -41,7 +41,7 @@ contract WinnerTakeAllPool5Level {
     mapping(address => address[]) public connectionRequestsList;
     mapping(uint256 => mapping(address => uint256)) public depositsPerRound;
 
-    mapping(address => uint256) public deposits;
+    mapping(uint256 => mapping(address => uint256)) public deposits; // roundId => user => amount
     address[] public participants;
 
     event GameStarted(uint256 indexed roundId, uint256 endTime);
@@ -222,13 +222,13 @@ contract WinnerTakeAllPool5Level {
         require(currentLevel == 4, "Only Level 4 users can stake");
         
         // Level 4 deposits fixed stakeSize amount
-        require(deposits[msg.sender] <= stakeSize, "Can not stake more than once.");
+        require(deposits[roundId][msg.sender] <= stakeSize, "Can not stake more than once.");
 
-        if (deposits[msg.sender] == 0) {
+        if (deposits[roundId][msg.sender] == 0) {
             participants.push(msg.sender);
         }
 
-        deposits[msg.sender] += stakeSize;
+        deposits[roundId][msg.sender] += stakeSize;
         totalPool[roundId] += stakeSize;
         usdcToken.transferFrom(msg.sender, address(this), stakeSize);
 
@@ -253,7 +253,7 @@ contract WinnerTakeAllPool5Level {
         
         for (uint256 i = 0; i < participants.length; i++) {
             address currentUser = participants[i];
-            usdcToken.transfer(currentUser, deposits[currentUser]);
+            usdcToken.transfer(currentUser, deposits[roundId][currentUser]);
         }
 
         totalPool[_roundId] = 0;
@@ -398,7 +398,7 @@ contract WinnerTakeAllPool5Level {
         
         // Reset deposits for current round
         for (uint256 i = 0; i < currentParticipants.length; i++) {
-            deposits[currentParticipants[i]] = 0;
+            deposits[roundId][currentParticipants[i]] = 0;
         }
         
         // Reset winner for current round
@@ -527,6 +527,33 @@ contract WinnerTakeAllPool5Level {
         if (playerLevel[roundId][_player] == 0) {
             playerLevel[roundId][_player] = 1;
             playerXP[roundId][_player] = 0;
+        }
+    }
+
+    function _checkAndUpdateLevel(address _player) private {
+        uint256 currentXP = playerXP[roundId][_player];
+        uint256 currentLevel = playerLevel[roundId][_player];
+        
+        // Check if player can level up
+        for (uint256 level = currentLevel + 1; level <= MAX_LEVEL; level++) {
+            if (currentXP >= xpRequirements[level - 1]) {
+                playerLevel[roundId][_player] = level;
+            } else {
+                break;
+            }
+        }
+    }
+
+    function _getTaskXPReward(string memory _taskType) private pure returns (uint256) {
+        // Define XP rewards for different task types
+        if (keccak256(abi.encodePacked(_taskType)) == keccak256(abi.encodePacked("daily"))) {
+            return 10;
+        } else if (keccak256(abi.encodePacked(_taskType)) == keccak256(abi.encodePacked("weekly"))) {
+            return 50;
+        } else if (keccak256(abi.encodePacked(_taskType)) == keccak256(abi.encodePacked("monthly"))) {
+            return 200;
+        } else {
+            return 5; // Default reward
         }
     }
 }
