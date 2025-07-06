@@ -160,15 +160,15 @@ contract WinnerTakeAllPool5Level {
 
         deposits[msg.sender] += stakeSize;
         totalPool += stakeSize;
-        token.transferFrom(msg.sender, address(this), stakeSize);
+        usdcToken.transferFrom(msg.sender, address(this), stakeSize);
 
         emit Deposited(msg.sender, stakeSize, _domain);
     }
 
     function selectWinner() external {
-        require (block.timestamp > gameEndTime, "The game has not ended yet.");
-        require (winner != address(0), "Invalid address.");
-        require (participants.length != 0, "No participants to choose a winner from.");
+        require(block.timestamp > gameEndTime, "The game has not ended yet.");
+        require(winner == address(0), "Winner has already been selected.");
+        require(participants.length != 0, "No participants to choose a winner from.");
 
         uint256 winningTicket = _getRandomNumber(participants.length);
         uint256 currentTicket = 0;
@@ -208,20 +208,21 @@ contract WinnerTakeAllPool5Level {
             }
         }
         uint256 prizeAmount = totalPool;
-        uint256 prizePerUser = prizeAmount / mutualConnectionsCount;
         totalPool = 0; // Prevent re-entrancy
+
+        uint256 totalRecipients = mutualConnectionsCount + 1; // +1 for winner and to prevent possible division by zero
+        uint256 prizePerShare = prizeAmount / totalRecipients;
 
         uint256 distributedToConnections = 0;
         for (address connection : connectionRequestsList[winner]) {
             if (mutualConnections[winner][connection]) {
-                usdcToken.transfer(connection, prizePerUser);
-                distributedToConnections += prizePerUser;
-                emit SingleShareOfPrizeClaimed(connection, prizePerUser);
+                usdcToken.transfer(connection, prizePerShare);
+                distributedToConnections += prizePerShare;
+                emit SingleShareOfPrizeClaimed(connection, prizePerShare);
             }
         }
         uint256 winnerPrize = prizeAmount - distributedToConnections;
         usdcToken.transfer(winner, winnerPrize);
-
         emit TotalPrizeClaimed(winner, prizeAmount);
         
         // Reset game state for the next round.
