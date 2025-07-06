@@ -42,7 +42,7 @@ contract WinnerTakeAllPool5Level {
     mapping(uint256 => mapping(address => uint256)) public depositsPerRound;
 
     mapping(uint256 => mapping(address => uint256)) public deposits; // roundId => user => amount
-    address[] public participants;
+    mapping(uint256 => address[]) public participants; // roundId => participants
 
     event GameStarted(uint256 indexed roundId, uint256 endTime);
     event Deposited(uint256 indexed roundId, address indexed user, uint256 amount, string domain);
@@ -208,6 +208,7 @@ contract WinnerTakeAllPool5Level {
     }
 
     function deposit(string memory _domain) external {
+        require(roundId > 0, "Round not initialized");
         require(bytes(_domain).length != 0, "Domain can not be empty.");
         require(block.timestamp <= gameEndTime[roundId], "The game has ended.");
         require(gameEndTime[roundId] > block.timestamp, "The game is not started or already ended.");
@@ -225,7 +226,7 @@ contract WinnerTakeAllPool5Level {
         require(deposits[roundId][msg.sender] <= stakeSize, "Can not stake more than once.");
 
         if (deposits[roundId][msg.sender] == 0) {
-            participants.push(msg.sender);
+            participants[roundId].push(msg.sender);
         }
 
         deposits[roundId][msg.sender] += stakeSize;
@@ -239,11 +240,11 @@ contract WinnerTakeAllPool5Level {
     function selectWinner() external {
         require(block.timestamp > gameEndTime[roundId], "The game has not ended yet.");
         require(winner[roundId] == address(0), "Winner has already been selected.");
-        require(participants.length != 0, "No participants to choose a winner from.");
+        require(participants[roundId].length != 0, "No participants to choose a winner from.");
 
-        uint256 winningIndex = _getRandomNumber(participants.length);
-        winner[roundId] = participants[winningIndex];
-        emit WinnerSelected(winner[roundId]);
+        uint256 winningIndex = _getRandomNumber(participants[roundId].length);
+        winner[roundId] = participants[roundId][winningIndex];
+        emit WinnerSelected(roundId, winner[roundId]);
     }
 
     function emergencyWithdraw(uint256 _roundId) external onlyOwner {
@@ -251,9 +252,9 @@ contract WinnerTakeAllPool5Level {
         require(winner[_roundId] == address(0), "Winner has not been selected yet.");
         require(totalPool[_roundId] != 0, "Prize is already claimed.");
         
-        for (uint256 i = 0; i < participants.length; i++) {
-            address currentUser = participants[i];
-            usdcToken.transfer(currentUser, deposits[roundId][currentUser]);
+        for (uint256 i = 0; i < participants[_roundId].length; i++) {
+            address currentUser = participants[_roundId][i];
+            usdcToken.transfer(currentUser, deposits[_roundId][currentUser]);
         }
 
         totalPool[_roundId] = 0;
@@ -280,12 +281,12 @@ contract WinnerTakeAllPool5Level {
             if (mutualConnections[winner[roundId]][connection]) {
                 usdcToken.transfer(connection, prizePerShare);
                 distributedToConnections += prizePerShare;
-                emit SingleShareOfPrizeClaimed(connection, prizePerShare);
+                emit SingleShareOfPrizeClaimed(roundId, connection, prizePerShare);
             }
         }
         uint256 winnerPrize = prizeAmount - distributedToConnections;
         usdcToken.transfer(winner[roundId], winnerPrize);
-        emit TotalPrizeClaimed(winner[roundId], prizeAmount);
+        emit TotalPrizeClaimed(roundId, winner[roundId], prizeAmount);
         
         // Reset game state for the next round.
         eventGameStartedEmittedOnce = false;
@@ -331,7 +332,7 @@ contract WinnerTakeAllPool5Level {
     }
 
     function getParticipants() external view returns (address[] memory) {
-        return participants;
+        return participants[roundId];
     }
 
     function isTheGameIsOn() external view returns (bool) {
@@ -391,10 +392,10 @@ contract WinnerTakeAllPool5Level {
     // Reset game state for new round
     function resetForNewRound() external onlyOwner {
         // Store participants before deletion
-        address[] memory currentParticipants = participants;
+        address[] memory currentParticipants = participants[roundId];
         
-        // Clear participants array
-        delete participants;
+        // Clear participants array for current round
+        delete participants[roundId];
         
         // Reset deposits for current round
         for (uint256 i = 0; i < currentParticipants.length; i++) {
@@ -534,6 +535,12 @@ contract WinnerTakeAllPool5Level {
         uint256 currentXP = playerXP[roundId][_player];
         uint256 currentLevel = playerLevel[roundId][_player];
         
+        // Ensure player is initialized
+        if (currentLevel == 0) {
+            playerLevel[roundId][_player] = 1;
+            currentLevel = 1;
+        }
+        
         // Check if player can level up
         for (uint256 level = currentLevel + 1; level <= MAX_LEVEL; level++) {
             if (currentXP >= xpRequirements[level - 1]) {
@@ -545,15 +552,55 @@ contract WinnerTakeAllPool5Level {
     }
 
     function _getTaskXPReward(string memory _taskType) private pure returns (uint256) {
+        // Convert to lowercase for consistent comparison
+        bytes memory taskBytes = bytes(_taskType);
+        bytes memory lowerTask = new bytes(taskBytes.length);
+        
+        for (uint256 i = 0; i < taskBytes.length; i++) {
+            if (taskBytes[i] >= 0x41 && taskBytes[i] <= 0x5A) { // A-Z
+                lowerTask[i] = bytes1(uint8(taskBytes[i]) + 32); // Convert to lowercase
+            } else {
+                lowerTask[i] = taskBytes[i];
+            }
+        }
+        
+        string memory lowerTaskType = string(lowerTask);
+        
         // Define XP rewards for different task types
-        if (keccak256(abi.encodePacked(_taskType)) == keccak256(abi.encodePacked("daily"))) {
+        if (keccak256(abi.encodePacked(lowerTaskType)) == keccak256(abi.encodePacked("daily"))) {
             return 10;
-        } else if (keccak256(abi.encodePacked(_taskType)) == keccak256(abi.encodePacked("weekly"))) {
+        } else if (keccak256(abi.encodePacked(lowerTaskType)) == keccak256(abi.encodePacked("weekly"))) {
             return 50;
-        } else if (keccak256(abi.encodePacked(_taskType)) == keccak256(abi.encodePacked("monthly"))) {
+        } else if (keccak256(abi.encodePacked(lowerTaskType)) == keccak256(abi.encodePacked("monthly"))) {
             return 200;
         } else {
             return 5; // Default reward
         }
+    }
+
+    // Add migration function for existing data
+    function migrateDeposits(address[] memory _users, uint256[] memory _amounts) external onlyOwner {
+        require(_users.length == _amounts.length, "Arrays length mismatch");
+        for (uint256 i = 0; i < _users.length; i++) {
+            deposits[roundId][_users[i]] = _amounts[i];
+        }
+    }
+
+    // Add function to check if round exists
+    function roundExists(uint256 _roundId) external view returns (bool) {
+        return gameEndTime[_roundId] != 0;
+    }
+
+    // Add function to get round info
+    function getRoundInfo(uint256 _roundId) external view returns (
+        uint256 endTime,
+        uint256 totalPool,
+        address winner,
+        uint256 participantCount
+    ) {
+        endTime = gameEndTime[_roundId];
+        totalPool = totalPool[_roundId];
+        winner = winner[_roundId];
+        participantCount = participants[_roundId].length;
     }
 }
