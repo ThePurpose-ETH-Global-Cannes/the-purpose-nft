@@ -2,11 +2,14 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./ThePurpose.sol";
 
 contract WinnerTakeAllPool5Level {
 
+    ThePurpose public transformationNFT;
     IERC20 public immutable usdcToken; // USDC on Flow
     address public owner;
+    address public nftMintApprover;
 
     uint256 public roundId;
 
@@ -14,6 +17,8 @@ contract WinnerTakeAllPool5Level {
 
     address constant public cadenceArch = 0x0000000000000000000000010000000000000001;
     
+    
+
     //uint256 public gameEndTime;
     mapping(uint256 => uint256) public gameEndTime;
     //uint256 internal totalPool;
@@ -55,8 +60,33 @@ contract WinnerTakeAllPool5Level {
 
     error GameAlreadyStarted();
 
-    constructor(address _tokenAddress) {
+    // XP and Level tracking per round
+    mapping(uint256 => mapping(address => uint256)) public playerXP; // roundId => player => XP
+    mapping(uint256 => mapping(address => uint256)) public playerLevel; // roundId => player => level
+
+    // 7 levels with your exact XP requirements
+    uint256[] public xpRequirements = [
+        0,    // Level 1 (starting level) - 0 XP
+        50,   // Level 2 - 50 XP total
+        75,   // Level 3 - 75 XP total
+        150,  // Level 4 - 150 XP total
+        300,  // Level 5 - 300 XP total
+        600,  // Level 6 - 600 XP total
+        1200, // Level 7 - 1200 XP total
+        2400  // Level 8 (max level) - 2400 XP total
+    ];
+
+    // Maximum level
+    uint256 public constant MAX_LEVEL = 7;
+
+    // Task completion events
+    event TaskCompleted(uint256 indexed roundId, address indexed player, string taskType, uint256 xpReward, uint256 totalXP, uint256 level);
+    event XPAdded(uint256 indexed roundId, address indexed player, uint256 xpAdded, uint256 totalXP, uint256 level);
+
+    constructor(address _tokenAddress, address _nftContract, address _nftMintApprover) {
         usdcToken = IERC20(_tokenAddress);
+        transformationNFT = ThePurpose(_nftContract);
+        nftMintApprover = _nftMintApprover;
         owner = msg.sender;
     }
 
@@ -169,7 +199,14 @@ contract WinnerTakeAllPool5Level {
         require(bytes(_domain).length != 0, "Domain can not be empty.");
         require(block.timestamp <= gameEndTime[roundId], "The game has ended.");
         require(gameEndTime[roundId] > block.timestamp, "The game is not started or already ended.");
-        require(deposits[msg.sender] <= stakeSize, "Can not stake more than once.");                                         // ToDo: Need to clarify      
+        
+        uint256 currentLevel = playerLevel[roundId][msg.sender];
+        
+        // Only Level 4 users can stake
+        require(currentLevel == 4, "Only Level 4 users can stake");
+        
+        // Level 4 deposits fixed stakeSize amount
+        require(deposits[msg.sender] <= stakeSize, "Can not stake more than once.");
 
         if (deposits[msg.sender] == 0) {
             participants.push(msg.sender);
@@ -179,7 +216,8 @@ contract WinnerTakeAllPool5Level {
         totalPool[roundId] += stakeSize;
         usdcToken.transferFrom(msg.sender, address(this), stakeSize);
 
-        emit Deposited(msg.sender, stakeSize, _domain);
+        // No XP from staking - XP comes from frontend-triggered tasks
+        emit Deposited(roundId, msg.sender, stakeSize, _domain);
     }
 
     function selectWinner() external {
@@ -235,6 +273,29 @@ contract WinnerTakeAllPool5Level {
         
         // Reset game state for the next round.
         eventGameStartedEmittedOnce = false;
+    }
+
+    function completeTransformation(uint256 blockNumber, bytes calldata signature) external {
+        require(playerLevel[msg.sender] >= 7, "Must reach Level 7 to complete transformation");
+        require(!transformationCompleted[msg.sender], "Transformation already completed");
+        
+        transformationCompleted[msg.sender] = true;
+        
+        // Mint NFT using the local contract
+        transformationNFT.mint(blockNumber, signature);
+        
+        // Track token ID
+        uint256 tokenId = transformationNFT.totalSupply() - 1;
+        playerNFTTokenId[msg.sender] = tokenId;
+        
+        // Claim BIG crypto reward automatically
+        if (!bigCryptoRewardClaimed[msg.sender]) {
+            bigCryptoRewardClaimed[msg.sender] = true;
+            usdcToken.transfer(msg.sender, BIG_CRYPTO_REWARD);
+            emit BigCryptoRewardClaimed(msg.sender, BIG_CRYPTO_REWARD);
+        }
+        
+        emit TransformationCompleted(msg.sender, tokenId);
     }
 
     // Service functions
@@ -311,8 +372,10 @@ contract WinnerTakeAllPool5Level {
         // Clear participants array
         delete participants;
         
-        // Reset deposits for all users (or track per round)
-        // This depends on whether you want deposits to carry over
+        // Reset deposits for current round
+        for (uint256 i = 0; i < participants.length; i++) {
+            deposits[participants[i]] = 0;
+        }
         
         // Reset winner for current round
         winner[roundId] = address(0);
@@ -343,4 +406,95 @@ contract WinnerTakeAllPool5Level {
 
     // Optional: Track connections per round
     mapping(uint256 => mapping(address => mapping(address => bool))) public mutualConnectionsPerRound;
+
+    // Add XP to reach next level (called from frontend)
+    function addXPToNextLevel(address _player) external onlyOwner {
+        uint256 currentXP = playerXP[roundId][_player];
+        uint256 currentLevel = playerLevel[roundId][_player];
+        
+        // Check if player can level up
+        if (currentLevel >= MAX_LEVEL) {
+            emit XPAdded(roundId, _player, 0, currentXP, currentLevel);
+            return; // Already at max level
+        }
+        
+        // Calculate XP needed for next level
+        uint256 xpNeededForNextLevel = xpRequirements[currentLevel];
+        uint256 xpDeficit = xpNeededForNextLevel - currentXP;
+        
+        if (xpDeficit > 0) {
+            playerXP[roundId][_player] += xpDeficit;
+            _checkAndUpdateLevel(_player);
+            emit XPAdded(roundId, _player, xpDeficit, playerXP[roundId][_player], playerLevel[roundId][_player]);
+        }
+    }
+
+    // Complete task and add XP based on level requirements
+    function completeTask(address _player, string memory _taskType) external onlyOwner {
+        uint256 currentXP = playerXP[roundId][_player];
+        uint256 currentLevel = playerLevel[roundId][_player];
+        
+        // Get base XP reward for task type
+        uint256 baseXPReward = _getTaskXPReward(_taskType);
+        
+        // Calculate XP needed for next level
+        uint256 xpNeededForNextLevel = 0;
+        if (currentLevel < MAX_LEVEL) {
+            xpNeededForNextLevel = xpRequirements[currentLevel];
+        }
+        
+        // Calculate how much XP to add
+        uint256 xpToAdd = 0;
+        if (currentLevel < MAX_LEVEL) {
+            uint256 xpDeficit = xpNeededForNextLevel - currentXP;
+            xpToAdd = xpDeficit > 0 ? xpDeficit : baseXPReward;
+        } else {
+            xpToAdd = baseXPReward; // At max level, just add base reward
+        }
+        
+        playerXP[roundId][_player] += xpToAdd;
+        _checkAndUpdateLevel(_player);
+        
+        emit TaskCompleted(roundId, _player, _taskType, xpToAdd, playerXP[roundId][_player], playerLevel[roundId][_player]);
+    }
+
+    // Get XP needed for next level
+    function getXPNeededForNextLevel(address _player) external view returns (uint256) {
+        uint256 currentLevel = playerLevel[roundId][_player];
+        if (currentLevel >= MAX_LEVEL) {
+            return 0; // Already at max level
+        }
+        
+        uint256 currentXP = playerXP[roundId][_player];
+        uint256 xpNeededForNextLevel = xpRequirements[currentLevel];
+        uint256 xpDeficit = xpNeededForNextLevel - currentXP;
+        
+        return xpDeficit > 0 ? xpDeficit : 0;
+    }
+
+    // Get player's progress info
+    function getPlayerProgress(address _player) external view returns (
+        uint256 currentXP,
+        uint256 currentLevel,
+        uint256 xpNeededForNextLevel,
+        uint256 progress,
+        bool canLevelUp
+    ) {
+        currentXP = playerXP[roundId][_player];
+        currentLevel = playerLevel[roundId][_player];
+        xpNeededForNextLevel = getXPNeededForNextLevel(_player);
+        
+        if (currentLevel >= MAX_LEVEL) {
+            progress = 100;
+            canLevelUp = false;
+        } else {
+            uint256 xpForCurrentLevel = xpRequirements[currentLevel - 1];
+            uint256 xpForNextLevel = xpRequirements[currentLevel];
+            uint256 xpNeeded = xpForNextLevel - xpForCurrentLevel;
+            uint256 xpProgress = currentXP - xpForCurrentLevel;
+            
+            progress = (xpProgress * 100) / xpNeeded;
+            canLevelUp = currentXP >= xpForNextLevel;
+        }
+    }
 }
