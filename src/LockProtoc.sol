@@ -9,6 +9,8 @@ contract WinnerTakeAllPool5Level {
     address public owner;
 
     uint256 public constant MAX_CONNECTIONS = 20;
+
+    address constant public cadenceArch = 0x0000000000000000000000010000000000000001;
     
     uint256 public gameEndTime;
     uint256 internal totalPool;
@@ -179,18 +181,9 @@ contract WinnerTakeAllPool5Level {
         require(winner == address(0), "Winner has already been selected.");
         require(participants.length != 0, "No participants to choose a winner from.");
 
-        uint256 winningTicket = _getRandomNumber(participants.length);
-        uint256 currentTicket = 0;
-
-        for (uint256 i = 0; i < participants.length; i++) {
-            address currentUser = participants[i];
-            currentTicket += deposits[currentUser];
-            if (winningTicket < currentTicket) {
-                winner = currentUser;
-                emit WinnerSelected(winner);
-                return;
-            }
-        }
+        uint256 winningIndex = _getRandomNumber(participants.length);
+        winner = participants[winningIndex];
+        emit WinnerSelected(winner);
     }
 
     function emergencyWithdraw() external onlyOwner {
@@ -241,8 +234,12 @@ contract WinnerTakeAllPool5Level {
     // Service functions
     
     function _getRandomNumber(uint256 _participantsCount) private view returns (uint256) {
-        uint256 random = uint256(keccak256(abi.encodePacked(block.timestamp, block.difficulty, participants.length)));
-        return random % _participantsCount;
+        (bool ok, bytes memory data) = cadenceArch.staticcall(abi.encodeWithSignature("revertibleRandom()"));
+        require(ok, "Failed to fetch a random number through Cadence Arch");
+        
+        uint64 randomNumber = abi.decode(data, (uint64));
+
+        return randomNumber % _participantsCount;
     }
 
     function getParticipants() external view returns (address[] memory) {
