@@ -8,6 +8,8 @@ contract WinnerTakeAllPool5Level {
     IERC20 public immutable usdcToken; // USDC on Flow
     address public owner;
 
+    uint256 public constant MAX_CONNECTIONS = 20;
+    
     uint256 public gameEndTime;
     uint256 internal totalPool;
     address internal winner;
@@ -89,6 +91,13 @@ contract WinnerTakeAllPool5Level {
 
     function acceptConnectionRequest(address _from) external {
         require(requestStatus[_from][msg.sender] == RequestStatus.Pending, "No pending request");
+        
+        // Check if accepting would exceed 20 connections for either user
+        uint256 currentConnections = getConnectionCount(msg.sender);
+        uint256 fromConnections = getConnectionCount(_from);
+        
+        require(currentConnections < 20, "You cannot have more than 20 connections");
+        require(fromConnections < 20, "User cannot have more than 20 connections");
         
         requestStatus[_from][msg.sender] = RequestStatus.Accepted;
         mutualConnections[_from][msg.sender] = true;
