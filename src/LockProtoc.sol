@@ -72,8 +72,7 @@ contract WinnerTakeAllPool5Level {
         150,  // Level 4 - 150 XP total
         300,  // Level 5 - 300 XP total
         600,  // Level 6 - 600 XP total
-        1200, // Level 7 - 1200 XP total
-        2400  // Level 8 (max level) - 2400 XP total
+        1200  // Level 7 - 1200 XP total (MAX_LEVEL)
     ];
 
     // Maximum level
@@ -82,6 +81,19 @@ contract WinnerTakeAllPool5Level {
     // Task completion events
     event TaskCompleted(uint256 indexed roundId, address indexed player, string taskType, uint256 xpReward, uint256 totalXP, uint256 level);
     event XPAdded(uint256 indexed roundId, address indexed player, uint256 xpAdded, uint256 totalXP, uint256 level);
+
+    // Add these missing variables:
+    mapping(address => bool) public transformationCompleted;
+    mapping(address => uint256) public playerNFTTokenId;
+    mapping(address => bool) public bigCryptoRewardClaimed;
+    uint256 public constant BIG_CRYPTO_REWARD = 1000; // 1000 USDC
+
+    // Add missing events:
+    event TransformationCompleted(address indexed player, uint256 tokenId);
+    event BigCryptoRewardClaimed(address indexed player, uint256 amount);
+
+    // Add reentrancy protection
+    bool private _isReentrant;
 
     constructor(address _tokenAddress, address _nftContract, address _nftMintApprover) {
         usdcToken = IERC20(_tokenAddress);
@@ -200,9 +212,13 @@ contract WinnerTakeAllPool5Level {
         require(block.timestamp <= gameEndTime[roundId], "The game has ended.");
         require(gameEndTime[roundId] > block.timestamp, "The game is not started or already ended.");
         
-        uint256 currentLevel = playerLevel[roundId][msg.sender];
+        // Auto-initialize player if first time
+        if (playerLevel[roundId][msg.sender] == 0) {
+            playerLevel[roundId][msg.sender] = 1;
+            playerXP[roundId][msg.sender] = 0;
+        }
         
-        // Only Level 4 users can stake
+        uint256 currentLevel = playerLevel[roundId][msg.sender];
         require(currentLevel == 4, "Only Level 4 users can stake");
         
         // Level 4 deposits fixed stakeSize amount
@@ -276,8 +292,12 @@ contract WinnerTakeAllPool5Level {
     }
 
     function completeTransformation(uint256 blockNumber, bytes calldata signature) external {
-        require(playerLevel[msg.sender] >= 7, "Must reach Level 7 to complete transformation");
+        require(playerLevel[roundId][msg.sender] >= 7, "Must reach Level 7 to complete transformation");
         require(!transformationCompleted[msg.sender], "Transformation already completed");
+        
+        // Add reentrancy protection
+        require(!_isReentrant, "Reentrant call");
+        _isReentrant = true;
         
         transformationCompleted[msg.sender] = true;
         
@@ -296,6 +316,7 @@ contract WinnerTakeAllPool5Level {
         }
         
         emit TransformationCompleted(msg.sender, tokenId);
+        _isReentrant = false;
     }
 
     // Service functions
@@ -369,12 +390,15 @@ contract WinnerTakeAllPool5Level {
 
     // Reset game state for new round
     function resetForNewRound() external onlyOwner {
+        // Store participants before deletion
+        address[] memory currentParticipants = participants;
+        
         // Clear participants array
         delete participants;
         
         // Reset deposits for current round
-        for (uint256 i = 0; i < participants.length; i++) {
-            deposits[participants[i]] = 0;
+        for (uint256 i = 0; i < currentParticipants.length; i++) {
+            deposits[currentParticipants[i]] = 0;
         }
         
         // Reset winner for current round
@@ -495,6 +519,14 @@ contract WinnerTakeAllPool5Level {
             
             progress = (xpProgress * 100) / xpNeeded;
             canLevelUp = currentXP >= xpForNextLevel;
+        }
+    }
+
+    // Add this function to initialize new players
+    function initializePlayer(address _player) external onlyOwner {
+        if (playerLevel[roundId][_player] == 0) {
+            playerLevel[roundId][_player] = 1;
+            playerXP[roundId][_player] = 0;
         }
     }
 }
