@@ -5,13 +5,13 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract WinnerTakeAllPool5Level {
 
-    IERC20 public immutable token;
+    IERC20 public immutable usdcToken; // USDC on Flow
     address public owner;
 
     uint256 public gameEndTime;
     uint256 internal totalPool;
     address internal winner;
-    uint256 public stakeSize = 10; // Need to clarify later
+    uint256 public stakeSize = 10;                                                                              // ToDo: Need to clarify later
 
     enum RequestStatus { None, Pending, Accepted, Rejected }
 
@@ -21,9 +21,6 @@ contract WinnerTakeAllPool5Level {
         require(msg.sender == owner, "Not an owner.");
         _;
     }
-
-    //mapping(address => address[]) public mutualConnections;
-    //mapping(address => address[]) public connectionsRequests;
 
     mapping(address => mapping(address => bool)) public mutualConnections;
     mapping(address => mapping(address => bool)) public connectionRequests;
@@ -49,7 +46,7 @@ contract WinnerTakeAllPool5Level {
     error GameAlreadyStarted();
 
     constructor(address _tokenAddress) {
-        token = IERC20(_tokenAddress);
+        usdcToken = IERC20(_tokenAddress);
         owner = msg.sender;
     }
 
@@ -187,6 +184,19 @@ contract WinnerTakeAllPool5Level {
         }
     }
 
+    function emergencyWithdraw() external onlyOwner {
+        require(block.timestamp > gameEndTime, "The game has not ended yet.");                                              // ToDo: Need to clarify
+        require(winner == address(0), "Winner has not been selected yet.");
+        require(totalPool != 0, "Prize is already claimed.");
+        
+        for (uint256 i = 0; i < participants.length; i++) {
+            address currentUser = participants[i];
+            usdcToken.transfer(currentUser, deposits[currentUser]);
+        }
+
+        totalPool = 0;
+    }
+
     function claimPrize() external {
         require(msg.sender == winner, "Not a winner.");
         require(totalPool != 0, "Prize is already claimed.");
@@ -204,13 +214,13 @@ contract WinnerTakeAllPool5Level {
         uint256 distributedToConnections = 0;
         for (address connection : connectionRequestsList[winner]) {
             if (mutualConnections[winner][connection]) {
-                token.transfer(connection, prizePerUser);
+                usdcToken.transfer(connection, prizePerUser);
                 distributedToConnections += prizePerUser;
                 emit SingleShareOfPrizeClaimed(connection, prizePerUser);
             }
         }
         uint256 winnerPrize = prizeAmount - distributedToConnections;
-        token.transfer(winner, winnerPrize);
+        usdcToken.transfer(winner, winnerPrize);
 
         emit TotalPrizeClaimed(winner, prizeAmount);
         
